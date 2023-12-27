@@ -1,0 +1,215 @@
+buildscript {
+	repositories {
+		mavenCentral()
+		maven {
+			url 'https://plugins.gradle.org/m2/'
+		}
+	}
+
+	dependencies {
+		classpath 'org.sonarsource.scanner.gradle:sonarqube-gradle-plugin:4.3.1.3277'
+		classpath 'com.github.spotbugs.snom:spotbugs-gradle-plugin:5.2.0'
+	}
+}
+
+
+plugins {
+	id 'java'
+	id 'jacoco'
+	id 'org.springframework.boot' version '3.1.4'
+	id 'io.spring.dependency-management' version '1.1.3'
+}
+
+repositories {
+	mavenCentral()
+//	maven {
+//		url 'https://repo'
+//		credentials {
+//			username = "$System.env.JFROG_USERNAME"
+//			password = "$System.env.JFROG_PASSWORD"
+//		}
+//	}
+}
+
+
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'java-library'
+apply plugin: 'java'
+apply plugin: 'jacoco'
+apply plugin: 'maven-publish'
+apply from: 'gradle/checkstyle.gradle'
+apply plugin: 'org.sonarqube'
+apply plugin: 'com.github.spotbugs'
+
+dependencies {
+    implementation('org.springframework.boot:spring-boot-starter-log4j2')
+    implementation('org.owasp.encoder:encoder:1.2.3')
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.2.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'junit:junit'
+    testImplementation group: 'com.h2database', name: 'h2', version: '2.2.224'
+}
+
+
+group = 'com.demo'
+java {
+	sourceCompatibility = 21
+	targetCompatibility = 21
+}
+
+version = System.getenv('BUILD_ID') ? System.getenv('BUILD_ID') : '0.0.1-SNAPSHOT'
+
+jacoco {
+	toolVersion = "0.8.10"
+}
+
+sourceSets {
+	integrationTest {
+		compileClasspath += sourceSets.main.output + sourceSets.test.output
+		runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+		java.srcDirs = ['src/integrationTest/java']
+		resources.srcDirs = ['src/integrationTest/resources']
+	}
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+task integrationTest(type: Test) {
+	useJUnitPlatform()
+	check.dependsOn(it)
+	description = 'Runs the integration tests.'
+	group = 'verification'
+	testClassesDirs = sourceSets.integrationTest.output.classesDirs
+	classpath = sourceSets.integrationTest.runtimeClasspath
+	shouldRunAfter(test)
+}
+
+sonar {
+	properties {
+		property 'sonar.projectKey', 'testsang-auth'
+		property 'sonar.organization', 'testorg'
+		property 'sonar.host.url', 'https://sonarcloud.io'
+		property "sonar.qualitygate.wait", "true"
+		property 'sonar.coverage.jacoco.reportPaths', '$buildDir/reports/jacoco/test/jacocoTestReport.xml'
+	}
+}
+
+test {
+	useJUnitPlatform()
+	finalizedBy jacocoTestReport // report is always generated after tests run
+	check.dependsOn jacocoTestCoverageVerification
+}
+
+jacocoTestReport {
+	dependsOn test
+	reports {
+		xml.required = true
+		html.destination file("$buildDir/reports/jacoco")
+	}
+	afterEvaluate {
+		classDirectories.setFrom(files(classDirectories.files.collect {
+			fileTree(dir: it, exclude: '**/gradle/**') // Exclude compiled classes
+		}))
+	}
+}
+
+jacocoTestCoverageVerification {
+	afterEvaluate {
+		classDirectories.setFrom(files(classDirectories.files.collect {
+			fileTree(dir: it, exclude: [''])
+		}))
+	}
+	violationRules {
+		rule {
+			limit {
+				counter = 'INSTRUCTION'
+				value = 'COVEREDRATIO'
+				minimum = 0.9
+			}
+		}
+	}
+}
+
+spotbugs {
+	ignoreFailures = false
+	showStackTraces = true
+	showProgress = true
+	effort = 'default'
+	reportLevel = 'medium'
+	visitors = [ 'FindSqlInjection', 'SwitchFallthrough', 'OptionalReturnNull', 'BooleanReturnNull' ]
+	omitVisitors = [ 'FindNonShortCircuit' ]
+	reportsDir = file("$buildDir/spotbugs")
+	onlyAnalyze = [ 'com.demo.-' ]
+	maxHeapSize = '1g'
+	extraArgs = [ '-nested:false' ]
+	jvmArgs = [ '-Duser.language=en' ]
+}
+
+spotbugsMain {
+	reports {
+		html {
+			required = true
+			outputLocation = file("$buildDir/reports/spotbugs/main/spotbugs.html")
+			stylesheet = 'fancy-hist.xsl'
+		}
+	}
+}
+
+configurations {
+	all {
+		exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+	}
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+	integrationTestCompile.extendsFrom testCompile
+	integrationTestImplementation.extendsFrom testImplementation
+	integrationTestRuntime.extendsFrom testRuntime
+}
+
+bootJar {
+	enabled = true
+}
+
+jar {
+	enabled = false
+	manifest {
+		attributes 'Main-Class': 'com.demo.DemoApplication'
+	}
+}
+
+
+
+
+publishing {
+	publications {
+		bootJava(MavenPublication) {
+			artifact bootJar
+		}
+	}
+
+	repositories {
+		maven {}
+	}
+}
+
+task setExecutable {
+	doLast {
+		def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+		def gradlewScript = isWindows ? 'gradlew.bat' : './gradlew'
+
+		if (!isWindows) {
+			project.exec {
+				commandLine 'chmod', '+x', gradlewScript
+			}
+		}
+	}
+}

@@ -1,0 +1,27 @@
+server:
+  servlet:
+    context-path: /DhpDevxTestsangAuth
+spring:
+  datasource:
+    url: jdbc:h2:mem:InitializerDb
+    driverClassName: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  security:
+    permit-endpoints: >
+      /swagger-ui/**,
+      /v3/api-docs/**
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9999/
+
+
